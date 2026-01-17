@@ -1,4 +1,8 @@
 pub const COMPRESSION_BLOCK_SIZE: usize = upack::X128;
+// in vint encoding, each byte stores 7 bits of data, so we need at most 32 / 7 = 4.57 bytes to
+// store a u32 in the worst case, rounding up to 5 bytes total
+const MAX_VINT_SIZE: usize = 5;
+const COMPRESSED_BLOCK_MAX_SIZE: usize = COMPRESSION_BLOCK_SIZE * MAX_VINT_SIZE;
 
 mod vint;
 
@@ -9,7 +13,8 @@ pub fn compressed_block_size(num_bits: u8) -> usize {
 }
 
 pub struct BlockEncoder {
-    pub output: [u8; upack::uint32::X128_MAX_OUTPUT_LEN],
+    pub packing_output: Box<[u8; upack::uint32::X128_MAX_OUTPUT_LEN]>,
+    pub vint_output: Box<[u8; COMPRESSED_BLOCK_MAX_SIZE]>,
 }
 
 impl Default for BlockEncoder {
@@ -21,20 +26,21 @@ impl Default for BlockEncoder {
 impl BlockEncoder {
     pub fn new() -> BlockEncoder {
         BlockEncoder {
-            output: [0u8; upack::uint32::X128_MAX_OUTPUT_LEN],
+            packing_output: Box::new([0u8; upack::uint32::X128_MAX_OUTPUT_LEN]),
+            vint_output: Box::new([0u8; COMPRESSED_BLOCK_MAX_SIZE]),
         }
     }
 
     pub fn compress_block_sorted(&mut self, block: &mut [u32], offset: u32) -> (u8, &[u8]) {
         let block: &mut [u32; COMPRESSION_BLOCK_SIZE] = block.try_into().unwrap();
         let details = if offset == 0 {
-            upack::compress_delta(offset, upack::X128, block, &mut self.output)
+            upack::compress_delta(offset, upack::X128, block, &mut self.packing_output)
         } else {
-            upack::compress_delta1(offset, upack::X128, block, &mut self.output)
+            upack::compress_delta1(offset, upack::X128, block, &mut self.packing_output)
         };
         (
             details.compressed_bit_length,
-            &self.output[..details.bytes_written],
+            &self.packing_output[..details.bytes_written],
         )
     }
 
@@ -62,10 +68,10 @@ impl BlockEncoder {
         };
         let block: &mut [u32; COMPRESSION_BLOCK_SIZE] = block.try_into().unwrap();
 
-        let details = upack::compress(upack::X128, block, &mut self.output);
+        let details = upack::compress(upack::X128, block, &mut self.packing_output);
         (
             details.compressed_bit_length,
-            &self.output[..details.bytes_written],
+            &self.packing_output[..details.bytes_written],
         )
     }
 }
@@ -246,11 +252,11 @@ pub trait VIntDecoder {
 
 impl VIntEncoder for BlockEncoder {
     fn compress_vint_sorted(&mut self, input: &[u32], offset: u32) -> &[u8] {
-        vint::compress_sorted(input, &mut self.output, offset)
+        vint::compress_sorted(input, &mut *self.vint_output, offset)
     }
 
     fn compress_vint_unsorted(&mut self, input: &[u32]) -> &[u8] {
-        vint::compress_unsorted(input, &mut self.output)
+        vint::compress_unsorted(input, &mut *self.vint_output)
     }
 }
 
