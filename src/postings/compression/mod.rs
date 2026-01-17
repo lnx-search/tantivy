@@ -1,10 +1,4 @@
-use bitpacking::{BitPacker, BitPacker4x};
-
-pub const COMPRESSION_BLOCK_SIZE: usize = BitPacker4x::BLOCK_LEN;
-// in vint encoding, each byte stores 7 bits of data, so we need at most 32 / 7 = 4.57 bytes to
-// store a u32 in the worst case, rounding up to 5 bytes total
-const MAX_VINT_SIZE: usize = 5;
-const COMPRESSED_BLOCK_MAX_SIZE: usize = COMPRESSION_BLOCK_SIZE * MAX_VINT_SIZE;
+pub const COMPRESSION_BLOCK_SIZE: usize = upack::X128;
 
 mod vint;
 
@@ -15,8 +9,7 @@ pub fn compressed_block_size(num_bits: u8) -> usize {
 }
 
 pub struct BlockEncoder {
-    bitpacker: BitPacker4x,
-    pub output: [u8; COMPRESSED_BLOCK_MAX_SIZE],
+    pub output: [u8; upack::uint32::X128_MAX_OUTPUT_LEN],
 }
 
 impl Default for BlockEncoder {
@@ -28,21 +21,21 @@ impl Default for BlockEncoder {
 impl BlockEncoder {
     pub fn new() -> BlockEncoder {
         BlockEncoder {
-            bitpacker: BitPacker4x::new(),
-            output: [0u8; COMPRESSED_BLOCK_MAX_SIZE],
+            output: [0u8; upack::uint32::X128_MAX_OUTPUT_LEN],
         }
     }
 
-    pub fn compress_block_sorted(&mut self, block: &[u32], offset: u32) -> (u8, &[u8]) {
-        // if offset is zero, convert it to None. This is correct as long as we do the same when
-        // decompressing. It's required in case the block starts with an actual zero.
-        let offset = if offset == 0u32 { None } else { Some(offset) };
-
-        let num_bits = self.bitpacker.num_bits_strictly_sorted(offset, block);
-        let written_size =
-            self.bitpacker
-                .compress_strictly_sorted(offset, block, &mut self.output[..], num_bits);
-        (num_bits, &self.output[..written_size])
+    pub fn compress_block_sorted(&mut self, block: &mut [u32], offset: u32) -> (u8, &[u8]) {
+        let block: &mut [u32; COMPRESSION_BLOCK_SIZE] = block.try_into().unwrap();
+        let details = if offset == 0 {
+            upack::compress_delta(offset, upack::X128, block, &mut self.output)
+        } else {
+            upack::compress_delta1(offset, upack::X128, block, &mut self.output)
+        };
+        (
+            details.compressed_bit_length,
+            &self.output[..details.bytes_written],
+        )
     }
 
     /// Compress a single block of unsorted numbers.
@@ -53,7 +46,7 @@ impl BlockEncoder {
     /// appear.
     pub fn compress_block_unsorted(
         &mut self,
-        block: &[u32],
+        block: &mut [u32],
         minus_one_encoded: bool,
     ) -> (u8, &[u8]) {
         debug_assert!(!minus_one_encoded || !block.contains(&0));
@@ -61,25 +54,26 @@ impl BlockEncoder {
         let mut block_minus_one = [0; COMPRESSION_BLOCK_SIZE];
         let block = if minus_one_encoded {
             for (elem_min_one, elem) in block_minus_one.iter_mut().zip(block) {
-                *elem_min_one = elem - 1;
+                *elem_min_one = *elem - 1;
             }
-            &block_minus_one
+            &mut block_minus_one
         } else {
             block
         };
+        let block: &mut [u32; COMPRESSION_BLOCK_SIZE] = block.try_into().unwrap();
 
-        let num_bits = self.bitpacker.num_bits(block);
-        let written_size = self
-            .bitpacker
-            .compress(block, &mut self.output[..], num_bits);
-        (num_bits, &self.output[..written_size])
+        let details = upack::compress(upack::X128, block, &mut self.output);
+        (
+            details.compressed_bit_length,
+            &self.output[..details.bytes_written],
+        )
     }
 }
 
 #[derive(Clone)]
 pub struct BlockDecoder {
-    bitpacker: BitPacker4x,
     output: [u32; COMPRESSION_BLOCK_SIZE],
+    scratch_space: [u8; upack::uint32::X128_MAX_OUTPUT_LEN],
     pub output_len: usize,
 }
 
@@ -92,8 +86,8 @@ impl Default for BlockDecoder {
 impl BlockDecoder {
     pub fn with_val(val: u32) -> BlockDecoder {
         BlockDecoder {
-            bitpacker: BitPacker4x::new(),
             output: [val; COMPRESSION_BLOCK_SIZE],
+            scratch_space: [0; upack::uint32::X128_MAX_OUTPUT_LEN],
             output_len: 0,
         }
     }
@@ -107,22 +101,33 @@ impl BlockDecoder {
         compressed_data: &[u8],
         offset: u32,
         num_bits: u8,
-        strict_delta: bool,
+        _strict_delta: bool,
     ) -> usize {
-        if strict_delta {
-            let offset = std::num::NonZeroU32::new(offset).map(std::num::NonZeroU32::get);
+        let compressed_data: &[u8; upack::uint32::X128_MAX_OUTPUT_LEN] =
+            if compressed_data.len() < upack::uint32::X128_MAX_OUTPUT_LEN {
+                self.scratch_space[..compressed_data.len()].copy_from_slice(compressed_data);
+                &self.scratch_space
+            } else {
+               (&compressed_data[..upack::uint32::X128_MAX_OUTPUT_LEN]).try_into().unwrap()
+            };
 
-            self.output_len = COMPRESSION_BLOCK_SIZE;
-            self.bitpacker.decompress_strictly_sorted(
+        self.output_len = COMPRESSION_BLOCK_SIZE;
+        if offset == 0 {
+            upack::decompress_delta(
                 offset,
+                COMPRESSION_BLOCK_SIZE,
+                num_bits,
                 compressed_data,
                 &mut self.output,
-                num_bits,
             )
         } else {
-            self.output_len = COMPRESSION_BLOCK_SIZE;
-            self.bitpacker
-                .decompress_sorted(offset, compressed_data, &mut self.output, num_bits)
+            upack::decompress_delta1(
+                offset,
+                COMPRESSION_BLOCK_SIZE,
+                num_bits,
+                compressed_data,
+                &mut self.output,
+            )
         }
     }
 
@@ -137,10 +142,21 @@ impl BlockDecoder {
         num_bits: u8,
         minus_one_encoded: bool,
     ) -> usize {
+        let compressed_data: &[u8; upack::uint32::X128_MAX_OUTPUT_LEN] =
+            if compressed_data.len() < upack::uint32::X128_MAX_OUTPUT_LEN {
+                self.scratch_space[..compressed_data.len()].copy_from_slice(compressed_data);
+                &self.scratch_space
+            } else {
+                (&compressed_data[..upack::uint32::X128_MAX_OUTPUT_LEN]).try_into().unwrap()
+            };
+
         self.output_len = COMPRESSION_BLOCK_SIZE;
-        let res = self
-            .bitpacker
-            .decompress(compressed_data, &mut self.output, num_bits);
+        let res = upack::decompress(
+            COMPRESSION_BLOCK_SIZE,
+            num_bits,
+            compressed_data,
+            &mut self.output,
+        );
         if minus_one_encoded {
             for val in &mut self.output {
                 *val += 1;
@@ -275,9 +291,9 @@ pub(crate) mod tests {
 
     #[test]
     fn test_encode_sorted_block() {
-        let vals: Vec<u32> = (0u32..128u32).map(|i| i * 7).collect();
+        let mut vals: Vec<u32> = (0u32..128u32).map(|i| i * 7).collect();
         let mut encoder = BlockEncoder::new();
-        let (num_bits, compressed_data) = encoder.compress_block_sorted(&vals, 0);
+        let (num_bits, compressed_data) = encoder.compress_block_sorted(&mut vals, 0);
         let mut decoder = BlockDecoder::default();
         {
             let consumed_num_bytes =
@@ -291,9 +307,9 @@ pub(crate) mod tests {
 
     #[test]
     fn test_encode_sorted_block_with_offset() {
-        let vals: Vec<u32> = (0u32..128u32).map(|i| 11 + i * 7).collect();
+        let mut vals: Vec<u32> = (0u32..128u32).map(|i| 11 + i * 7).collect();
         let mut encoder = BlockEncoder::default();
-        let (num_bits, compressed_data) = encoder.compress_block_sorted(&vals, 10);
+        let (num_bits, compressed_data) = encoder.compress_block_sorted(&mut vals, 10);
         let mut decoder = BlockDecoder::default();
         {
             let consumed_num_bytes =
@@ -309,9 +325,9 @@ pub(crate) mod tests {
     fn test_encode_sorted_block_with_junk() {
         let mut compressed: Vec<u8> = Vec::new();
         let n = 128;
-        let vals: Vec<u32> = (0..n).map(|i| 11u32 + (i as u32) * 7u32).collect();
+        let mut vals: Vec<u32> = (0..n).map(|i| 11u32 + (i as u32) * 7u32).collect();
         let mut encoder = BlockEncoder::default();
-        let (num_bits, compressed_data) = encoder.compress_block_sorted(&vals, 10);
+        let (num_bits, compressed_data) = encoder.compress_block_sorted(&mut vals, 10);
         compressed.extend_from_slice(compressed_data);
         compressed.push(173u8);
         let mut decoder = BlockDecoder::default();
@@ -331,10 +347,10 @@ pub(crate) mod tests {
         for minus_one_encode in [false, true] {
             let mut compressed: Vec<u8> = Vec::new();
             let n = 128;
-            let vals: Vec<u32> = (0..n).map(|i| 11u32 + (i as u32) * 7u32 % 12).collect();
+            let mut vals: Vec<u32> = (0..n).map(|i| 11u32 + (i as u32) * 7u32 % 12).collect();
             let mut encoder = BlockEncoder::default();
             let (num_bits, compressed_data) =
-                encoder.compress_block_unsorted(&vals, minus_one_encode);
+                encoder.compress_block_unsorted(&mut vals, minus_one_encode);
             compressed.extend_from_slice(compressed_data);
             compressed.push(173u8);
             let mut decoder = BlockDecoder::default();

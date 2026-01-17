@@ -268,8 +268,16 @@ impl Block {
         &self.doc_ids[..self.len]
     }
 
+    fn raw_doc_ids_mut(&mut self) -> &mut [DocId; COMPRESSION_BLOCK_SIZE] {
+        &mut self.doc_ids
+    }
+
     fn term_freqs(&self) -> &[u32] {
         &self.term_freqs[..self.len]
+    }
+
+    fn raw_term_freqs_mut(&mut self) -> &mut [u32; COMPRESSION_BLOCK_SIZE] {
+        &mut self.term_freqs
     }
 
     fn clear(&mut self) {
@@ -365,29 +373,14 @@ impl PostingsSerializer {
     }
 
     fn write_block(&mut self) {
-        {
-            // encode the doc ids
-            let (num_bits, block_encoded): (u8, &[u8]) = self
-                .block_encoder
-                .compress_block_sorted(self.block.doc_ids(), self.last_doc_id_encoded);
-            self.last_doc_id_encoded = self.block.last_doc();
-            self.skip_write
-                .write_doc(self.last_doc_id_encoded, num_bits);
-            // last el block 0, offset block 1,
-            self.postings_write.extend(block_encoded);
-        }
         if self.term_has_freq {
-            let (num_bits, block_encoded): (u8, &[u8]) = self
-                .block_encoder
-                .compress_block_unsorted(self.block.term_freqs(), true);
-            self.postings_write.extend(block_encoded);
-            self.skip_write.write_term_freq(num_bits);
             if self.mode.has_positions() {
                 // We serialize the sum of term freqs within the skip information
                 // in order to navigate through positions.
                 let sum_freq = self.block.term_freqs().iter().cloned().sum();
                 self.skip_write.write_total_term_freq(sum_freq);
             }
+
             let mut blockwand_params = (0u8, 0u32);
             if let Some(bm25_weight) = self.bm25_weight.as_ref() {
                 if let Some(fieldnorm_reader) = self.fieldnorm_reader.as_ref() {
@@ -411,9 +404,29 @@ impl PostingsSerializer {
                         .unwrap();
                 }
             }
+
+            let (num_bits, block_encoded): (u8, &[u8]) = self
+                .block_encoder
+                .compress_block_unsorted(self.block.raw_term_freqs_mut(), true);
+            self.postings_write.extend(block_encoded);
+            self.skip_write.write_term_freq(num_bits);
+
             let (fieldnorm_id, term_freq) = blockwand_params;
             self.skip_write.write_blockwand_max(fieldnorm_id, term_freq);
         }
+
+        {
+            // encode the doc ids
+            let (num_bits, block_encoded): (u8, &[u8]) = self
+                .block_encoder
+                .compress_block_sorted(self.block.raw_doc_ids_mut(), self.last_doc_id_encoded);
+            self.last_doc_id_encoded = self.block.last_doc();
+            self.skip_write
+                .write_doc(self.last_doc_id_encoded, num_bits);
+            // last el block 0, offset block 1,
+            self.postings_write.extend(block_encoded);
+        }
+
         self.block.clear();
     }
 

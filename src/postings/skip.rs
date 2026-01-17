@@ -190,10 +190,10 @@ impl SkipReader {
     fn read_block_info(&mut self) {
         let bytes = self.owned_read.as_slice();
         let advance_len: usize;
-        self.last_doc_in_block = read_u32(bytes);
-        let (doc_num_bits, strict_delta_encoded) = decode_bitwidth(bytes[4]);
         match self.skip_info {
             IndexRecordOption::Basic => {
+                self.last_doc_in_block = read_u32(bytes);
+                let (doc_num_bits, strict_delta_encoded) = decode_bitwidth(bytes[4]);
                 advance_len = 5;
                 self.block_info = BlockInfo::BitPacked {
                     doc_num_bits,
@@ -205,9 +205,11 @@ impl SkipReader {
                 };
             }
             IndexRecordOption::WithFreqs => {
-                let tf_num_bits = bytes[5];
-                let block_wand_fieldnorm_id = bytes[6];
-                let block_wand_term_freq = decode_block_wand_max_tf(bytes[7]);
+                let tf_num_bits = bytes[0];
+                let block_wand_fieldnorm_id = bytes[1];
+                let block_wand_term_freq = decode_block_wand_max_tf(bytes[2]);
+                self.last_doc_in_block = read_u32(&bytes[3..7]);
+                let (doc_num_bits, strict_delta_encoded) = decode_bitwidth(bytes[7]);
                 advance_len = 8;
                 self.block_info = BlockInfo::BitPacked {
                     doc_num_bits,
@@ -219,10 +221,12 @@ impl SkipReader {
                 };
             }
             IndexRecordOption::WithFreqsAndPositions => {
-                let tf_num_bits = bytes[5];
-                let tf_sum = read_u32(&bytes[6..10]);
-                let block_wand_fieldnorm_id = bytes[10];
-                let block_wand_term_freq = decode_block_wand_max_tf(bytes[11]);
+                let tf_sum = read_u32(&bytes[0..4]);
+                let tf_num_bits = bytes[4];
+                let block_wand_fieldnorm_id = bytes[5];
+                let block_wand_term_freq = decode_block_wand_max_tf(bytes[6]);
+                self.last_doc_in_block = read_u32(&bytes[7..11]);
+                let (doc_num_bits, strict_delta_encoded) = decode_bitwidth(bytes[11]);
                 advance_len = 12;
                 self.block_info = BlockInfo::BitPacked {
                     doc_num_bits,

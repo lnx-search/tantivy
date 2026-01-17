@@ -31,12 +31,10 @@
 mod reader;
 mod serializer;
 
-use bitpacking::{BitPacker, BitPacker4x};
-
 pub use self::reader::PositionReader;
 pub use self::serializer::PositionSerializer;
 
-const COMPRESSION_BLOCK_SIZE: usize = BitPacker4x::BLOCK_LEN;
+const COMPRESSION_BLOCK_SIZE: usize = upack::X128;
 
 #[cfg(test)]
 pub(crate) mod tests {
