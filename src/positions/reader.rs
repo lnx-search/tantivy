@@ -65,12 +65,13 @@ impl PositionReader {
     ///
     /// Panics if there are not that many remaining blocks.
     fn advance_num_blocks(&mut self, num_blocks: usize) {
-        let num_bits: usize = self.bit_widths.as_ref()[..num_blocks]
+        let num_bytes_to_skip: usize = self.bit_widths.as_ref()[..num_blocks]
             .iter()
             .cloned()
-            .map(|num_bits| num_bits as usize)
+            .map(|num_bits| {
+                upack::uint32::max_compressed_size::<COMPRESSION_BLOCK_SIZE>(num_bits as usize)
+            })
             .sum();
-        let num_bytes_to_skip = num_bits * COMPRESSION_BLOCK_SIZE / 8;
         self.bit_widths.advance(num_blocks);
         self.positions.advance(num_bytes_to_skip);
         self.anchor_offset += (num_blocks * COMPRESSION_BLOCK_SIZE) as u64;
@@ -83,10 +84,8 @@ impl PositionReader {
         let bit_widths = self.bit_widths.as_slice();
         let byte_offset: usize = bit_widths[0..block_rel_id]
             .iter()
-            .map(|&b| b as usize)
-            .sum::<usize>()
-            * COMPRESSION_BLOCK_SIZE
-            / 8;
+            .map(|&b| upack::uint32::max_compressed_size::<COMPRESSION_BLOCK_SIZE>(b as usize))
+            .sum::<usize>();
         let compressed_data = &self.positions.as_slice()[byte_offset..];
         if bit_widths.len() > block_rel_id {
             // that block is bitpacked.

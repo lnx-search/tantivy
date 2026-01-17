@@ -405,25 +405,28 @@ impl PostingsSerializer {
                 }
             }
 
-            let (num_bits, block_encoded): (u8, &[u8]) = self
-                .block_encoder
-                .compress_block_unsorted(self.block.raw_term_freqs_mut(), true);
-            self.postings_write.extend(block_encoded);
-            self.skip_write.write_term_freq(num_bits);
-
             let (fieldnorm_id, term_freq) = blockwand_params;
             self.skip_write.write_blockwand_max(fieldnorm_id, term_freq);
         }
 
         {
             // encode the doc ids
+            let previous_doc_id_encoded = self.last_doc_id_encoded;
             self.last_doc_id_encoded = self.block.last_doc();
             let (num_bits, block_encoded): (u8, &[u8]) = self
                 .block_encoder
-                .compress_block_sorted(self.block.raw_doc_ids_mut(), self.last_doc_id_encoded);
+                .compress_block_sorted(self.block.raw_doc_ids_mut(), previous_doc_id_encoded);
             self.skip_write
                 .write_doc(self.last_doc_id_encoded, num_bits);
             // last el block 0, offset block 1,
+            self.postings_write.extend(block_encoded);
+        }
+
+        if self.term_has_freq {
+            let (num_bits, block_encoded): (u8, &[u8]) = self
+                .block_encoder
+                .compress_block_unsorted(self.block.raw_term_freqs_mut(), true);
+            self.skip_write.write_term_freq(num_bits);
             self.postings_write.extend(block_encoded);
         }
 

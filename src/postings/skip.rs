@@ -205,11 +205,11 @@ impl SkipReader {
                 };
             }
             IndexRecordOption::WithFreqs => {
-                let tf_num_bits = bytes[0];
-                let block_wand_fieldnorm_id = bytes[1];
-                let block_wand_term_freq = decode_block_wand_max_tf(bytes[2]);
-                self.last_doc_in_block = read_u32(&bytes[3..7]);
-                let (doc_num_bits, strict_delta_encoded) = decode_bitwidth(bytes[7]);
+                let block_wand_fieldnorm_id = bytes[0];
+                let block_wand_term_freq = decode_block_wand_max_tf(bytes[1]);
+                self.last_doc_in_block = read_u32(&bytes[2..6]);
+                let (doc_num_bits, strict_delta_encoded) = decode_bitwidth(bytes[6]);
+                let tf_num_bits = bytes[7];
                 advance_len = 8;
                 self.block_info = BlockInfo::BitPacked {
                     doc_num_bits,
@@ -222,11 +222,11 @@ impl SkipReader {
             }
             IndexRecordOption::WithFreqsAndPositions => {
                 let tf_sum = read_u32(&bytes[0..4]);
-                let tf_num_bits = bytes[4];
-                let block_wand_fieldnorm_id = bytes[5];
-                let block_wand_term_freq = decode_block_wand_max_tf(bytes[6]);
-                self.last_doc_in_block = read_u32(&bytes[7..11]);
-                let (doc_num_bits, strict_delta_encoded) = decode_bitwidth(bytes[11]);
+                let block_wand_fieldnorm_id = bytes[4];
+                let block_wand_term_freq = decode_block_wand_max_tf(bytes[5]);
+                self.last_doc_in_block = read_u32(&bytes[6..10]);
+                let (doc_num_bits, strict_delta_encoded) = decode_bitwidth(bytes[10]);
+                let tf_num_bits = bytes[11];
                 advance_len = 12;
                 self.block_info = BlockInfo::BitPacked {
                     doc_num_bits,
@@ -327,12 +327,12 @@ mod tests {
     fn test_skip_with_freq() {
         let buf = {
             let mut skip_serializer = SkipSerializer::new();
-            skip_serializer.write_term_freq(3u8);
             skip_serializer.write_blockwand_max(13u8, 3u32);
             skip_serializer.write_doc(1u32, 2u8);
-            skip_serializer.write_term_freq(2u8);
+            skip_serializer.write_term_freq(3u8);
             skip_serializer.write_blockwand_max(8u8, 2u32);
             skip_serializer.write_doc(5u32, 5u8);
+            skip_serializer.write_term_freq(2u8);
             skip_serializer.data().to_owned()
         };
         let doc_freq = 3u32 + (COMPRESSION_BLOCK_SIZE * 2) as u32;
