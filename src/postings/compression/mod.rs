@@ -6,12 +6,6 @@ const COMPRESSED_BLOCK_MAX_SIZE: usize = COMPRESSION_BLOCK_SIZE * MAX_VINT_SIZE;
 
 mod vint;
 
-/// Returns the size in bytes of a compressed block, given `num_bits`.
-#[inline]
-pub fn compressed_block_size(num_bits: u8) -> usize {
-    (num_bits as usize) * COMPRESSION_BLOCK_SIZE / 8
-}
-
 pub struct BlockEncoder {
     pub packing_output: Box<[u8; upack::uint32::X128_MAX_OUTPUT_LEN]>,
     pub vint_output: Box<[u8; COMPRESSED_BLOCK_MAX_SIZE]>,
@@ -114,7 +108,9 @@ impl BlockDecoder {
                 self.scratch_space[..compressed_data.len()].copy_from_slice(compressed_data);
                 &self.scratch_space
             } else {
-               (&compressed_data[..upack::uint32::X128_MAX_OUTPUT_LEN]).try_into().unwrap()
+                (&compressed_data[..upack::uint32::X128_MAX_OUTPUT_LEN])
+                    .try_into()
+                    .unwrap()
             };
 
         self.output_len = COMPRESSION_BLOCK_SIZE;
@@ -153,7 +149,9 @@ impl BlockDecoder {
                 self.scratch_space[..compressed_data.len()].copy_from_slice(compressed_data);
                 &self.scratch_space
             } else {
-                (&compressed_data[..upack::uint32::X128_MAX_OUTPUT_LEN]).try_into().unwrap()
+                (&compressed_data[..upack::uint32::X128_MAX_OUTPUT_LEN])
+                    .try_into()
+                    .unwrap()
             };
 
         self.output_len = COMPRESSION_BLOCK_SIZE;
@@ -298,6 +296,7 @@ pub(crate) mod tests {
     #[test]
     fn test_encode_sorted_block() {
         let mut vals: Vec<u32> = (0u32..128u32).map(|i| i * 7).collect();
+        let original_vals = vals.clone();
         let mut encoder = BlockEncoder::new();
         let (num_bits, compressed_data) = encoder.compress_block_sorted(&mut vals, 0);
         let mut decoder = BlockDecoder::default();
@@ -307,13 +306,14 @@ pub(crate) mod tests {
             assert_eq!(consumed_num_bytes, compressed_data.len());
         }
         for i in 0..128 {
-            assert_eq!(vals[i], decoder.output(i));
+            assert_eq!(original_vals[i], decoder.output(i), "pos: {i}");
         }
     }
 
     #[test]
     fn test_encode_sorted_block_with_offset() {
         let mut vals: Vec<u32> = (0u32..128u32).map(|i| 11 + i * 7).collect();
+        let original_vals = vals.clone();
         let mut encoder = BlockEncoder::default();
         let (num_bits, compressed_data) = encoder.compress_block_sorted(&mut vals, 10);
         let mut decoder = BlockDecoder::default();
@@ -323,7 +323,7 @@ pub(crate) mod tests {
             assert_eq!(consumed_num_bytes, compressed_data.len());
         }
         for i in 0..128 {
-            assert_eq!(vals[i], decoder.output(i));
+            assert_eq!(original_vals[i], decoder.output(i));
         }
     }
 
@@ -332,6 +332,7 @@ pub(crate) mod tests {
         let mut compressed: Vec<u8> = Vec::new();
         let n = 128;
         let mut vals: Vec<u32> = (0..n).map(|i| 11u32 + (i as u32) * 7u32).collect();
+        let original_vals = vals.clone();
         let mut encoder = BlockEncoder::default();
         let (num_bits, compressed_data) = encoder.compress_block_sorted(&mut vals, 10);
         compressed.extend_from_slice(compressed_data);
@@ -344,7 +345,7 @@ pub(crate) mod tests {
             assert_eq!(compressed[consumed_num_bytes], 173u8);
         }
         for i in 0..n {
-            assert_eq!(vals[i], decoder.output(i));
+            assert_eq!(original_vals[i], decoder.output(i));
         }
     }
 
@@ -354,6 +355,7 @@ pub(crate) mod tests {
             let mut compressed: Vec<u8> = Vec::new();
             let n = 128;
             let mut vals: Vec<u32> = (0..n).map(|i| 11u32 + (i as u32) * 7u32 % 12).collect();
+            let original_vals = vals.clone();
             let mut encoder = BlockEncoder::default();
             let (num_bits, compressed_data) =
                 encoder.compress_block_unsorted(&mut vals, minus_one_encode);
@@ -367,7 +369,7 @@ pub(crate) mod tests {
                 assert_eq!(compressed[consumed_num_bytes], 173u8);
             }
             for i in 0..n {
-                assert_eq!(vals[i], decoder.output(i));
+                assert_eq!(original_vals[i], decoder.output(i));
             }
         }
     }

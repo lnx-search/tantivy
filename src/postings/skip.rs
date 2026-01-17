@@ -1,5 +1,5 @@
 use crate::directory::OwnedBytes;
-use crate::postings::compression::{compressed_block_size, COMPRESSION_BLOCK_SIZE};
+use crate::postings::compression::COMPRESSION_BLOCK_SIZE;
 use crate::query::Bm25Weight;
 use crate::schema::IndexRecordOption;
 use crate::{DocId, Score, TERMINATED};
@@ -270,7 +270,12 @@ impl SkipReader {
                 ..
             } => {
                 self.remaining_docs -= COMPRESSION_BLOCK_SIZE as u32;
-                self.byte_offset += compressed_block_size(doc_num_bits + tf_num_bits);
+                self.byte_offset += upack::uint32::max_compressed_size::<COMPRESSION_BLOCK_SIZE>(
+                    doc_num_bits as usize,
+                );
+                self.byte_offset += upack::uint32::max_compressed_size::<COMPRESSION_BLOCK_SIZE>(
+                    tf_num_bits as usize,
+                );
                 self.position_offset += tf_sum as u64;
             }
             BlockInfo::VInt { num_docs } => {
@@ -322,12 +327,12 @@ mod tests {
     fn test_skip_with_freq() {
         let buf = {
             let mut skip_serializer = SkipSerializer::new();
-            skip_serializer.write_doc(1u32, 2u8);
             skip_serializer.write_term_freq(3u8);
             skip_serializer.write_blockwand_max(13u8, 3u32);
-            skip_serializer.write_doc(5u32, 5u8);
+            skip_serializer.write_doc(1u32, 2u8);
             skip_serializer.write_term_freq(2u8);
             skip_serializer.write_blockwand_max(8u8, 2u32);
+            skip_serializer.write_doc(5u32, 5u8);
             skip_serializer.data().to_owned()
         };
         let doc_freq = 3u32 + (COMPRESSION_BLOCK_SIZE * 2) as u32;
