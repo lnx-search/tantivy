@@ -103,15 +103,14 @@ impl BlockDecoder {
         num_bits: u8,
         _strict_delta: bool,
     ) -> usize {
-        let compressed_data: &[u8; upack::uint32::X128_MAX_OUTPUT_LEN] =
-            if compressed_data.len() < upack::uint32::X128_MAX_OUTPUT_LEN {
-                self.scratch_space[..compressed_data.len()].copy_from_slice(compressed_data);
-                &self.scratch_space
-            } else {
-                (&compressed_data[..upack::uint32::X128_MAX_OUTPUT_LEN])
-                    .try_into()
-                    .unwrap()
-            };
+        let min_required_size =
+            upack::uint32::max_compressed_size::<COMPRESSION_BLOCK_SIZE>(num_bits as usize);
+        let compressed_data = if compressed_data.len() < min_required_size {
+            self.scratch_space[..compressed_data.len()].copy_from_slice(compressed_data);
+            &self.scratch_space
+        } else {
+            compressed_data
+        };
 
         self.output_len = COMPRESSION_BLOCK_SIZE;
         if offset == 0 {
@@ -144,15 +143,14 @@ impl BlockDecoder {
         num_bits: u8,
         minus_one_encoded: bool,
     ) -> usize {
-        let compressed_data: &[u8; upack::uint32::X128_MAX_OUTPUT_LEN] =
-            if compressed_data.len() < upack::uint32::X128_MAX_OUTPUT_LEN {
-                self.scratch_space[..compressed_data.len()].copy_from_slice(compressed_data);
-                &self.scratch_space
-            } else {
-                (&compressed_data[..upack::uint32::X128_MAX_OUTPUT_LEN])
-                    .try_into()
-                    .unwrap()
-            };
+        let min_required_size =
+            upack::uint32::max_compressed_size::<COMPRESSION_BLOCK_SIZE>(num_bits as usize);
+        let compressed_data = if compressed_data.len() < min_required_size {
+            self.scratch_space[..compressed_data.len()].copy_from_slice(compressed_data);
+            &self.scratch_space
+        } else {
+            compressed_data
+        };
 
         self.output_len = COMPRESSION_BLOCK_SIZE;
         let res = upack::decompress(
