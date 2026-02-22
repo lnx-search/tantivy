@@ -27,11 +27,13 @@ impl BlockEncoder {
 
     pub fn compress_block_sorted(&mut self, block: &mut [u32], offset: u32) -> (u8, &[u8]) {
         let block: &mut [u32; COMPRESSION_BLOCK_SIZE] = block.try_into().unwrap();
+        let data = block.to_vec();
         let details = if offset == 0 {
             upack::compress_delta(offset, upack::X128, block, &mut self.packing_output)
         } else {
             upack::compress_delta1(offset, upack::X128, block, &mut self.packing_output)
         };
+        assert!(details.compressed_bit_length < 32, "bitlength was wrong: {} {data:?}", details.compressed_bit_length);
         (
             details.compressed_bit_length,
             &self.packing_output[..details.bytes_written],
