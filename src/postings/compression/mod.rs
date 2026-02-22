@@ -33,7 +33,7 @@ impl BlockEncoder {
         } else {
             upack::compress_delta1(offset, upack::X128, block, &mut self.packing_output)
         };
-        assert!(details.compressed_bit_length < 32, "bitlength was wrong: {} {data:?}", details.compressed_bit_length);
+        assert!(details.compressed_bit_length < 32, "bitlength was wrong: {} offset:{offset} {data:?}", details.compressed_bit_length);
         (
             details.compressed_bit_length,
             &self.packing_output[..details.bytes_written],
