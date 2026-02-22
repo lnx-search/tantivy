@@ -284,11 +284,13 @@ impl Block {
         self.len = 0;
     }
 
+    #[track_caller]
     fn append_doc(&mut self, doc: DocId, term_freq: u32) {
         let len = self.len;
         self.doc_ids[len] = doc;
         self.term_freqs[len] = term_freq;
         self.len = len + 1;
+        assert!(self.doc_ids[..self.len].is_sorted());
     }
 
     fn is_full(&self) -> bool {
@@ -413,7 +415,6 @@ impl PostingsSerializer {
             // encode the doc ids
             let previous_doc_id_encoded = self.last_doc_id_encoded;
             self.last_doc_id_encoded = self.block.last_doc();
-            assert_eq!(self.block.len, COMPRESSION_BLOCK_SIZE);
             let (num_bits, block_encoded): (u8, &[u8]) = self
                 .block_encoder
                 .compress_block_sorted(self.block.raw_doc_ids_mut(), previous_doc_id_encoded);
