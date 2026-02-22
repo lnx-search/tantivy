@@ -413,6 +413,7 @@ impl PostingsSerializer {
             // encode the doc ids
             let previous_doc_id_encoded = self.last_doc_id_encoded;
             self.last_doc_id_encoded = self.block.last_doc();
+            assert_eq!(self.block.len, COMPRESSION_BLOCK_SIZE);
             let (num_bits, block_encoded): (u8, &[u8]) = self
                 .block_encoder
                 .compress_block_sorted(self.block.raw_doc_ids_mut(), previous_doc_id_encoded);
